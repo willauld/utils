@@ -10,7 +10,7 @@ import (
 	"unsafe"
 
 	"github.com/spf13/pflag"
-	"github.com/willauld/backuputils/hashdictionary"
+	"github.com/willauld/utils/hashdictionary"
 )
 
 var version = struct {
@@ -40,8 +40,10 @@ type fileInfo struct {
 	size int64
 }
 
+var masterList []fileInfo
+
 type payload struct {
-	fs []fileInfo
+	fs []*fileInfo
 }
 
 func value2payload(v *hashdictionary.ValuePayload) (i *payload) {
@@ -90,18 +92,7 @@ func a(path string, f os.FileInfo, err error) error {
 			log.Fatal(ferr)
 		}
 		md5str := fmt.Sprintf("%x", h.Sum(nil))
-		te, err := md5Dict.Insert(hashdictionary.DictEntry{Str: md5str})
-		if err != nil {
-			log.Fatal(err)
-		}
-		var pl *payload
-		if te.Value == nil {
-			pl = &payload{}
-			te.Value = payload2value(pl)
-		} else {
-			pl = value2payload(te.Value)
-		}
-		pl.fs = append(pl.fs, fileInfo{f.Name(), path, md5str, f.Size()})
+		masterList = append(masterList, fileInfo{f.Name(), path, md5str, f.Size()})
 
 		//fmt.Printf("\t%s %s\n", md5str, f.Name())
 	}
@@ -117,6 +108,23 @@ func display(a hashdictionary.DictEntry) {
 			fmt.Printf("\t%d - %d bytes %s\n", i, fi.size, fi.path)
 		}
 		dictCount++
+	}
+}
+
+func masterToMD5Dict() {
+	for _, v := range masterList {
+		te, err := md5Dict.Insert(hashdictionary.DictEntry{Str: v.md5})
+		if err != nil {
+			log.Fatal(err)
+		}
+		var pl *payload
+		if te.Value == nil {
+			pl = &payload{}
+			te.Value = payload2value(pl)
+		} else {
+			pl = value2payload(te.Value)
+		}
+		pl.fs = append(pl.fs, &v)
 	}
 }
 
@@ -151,12 +159,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	md5Dict = hashdictionary.Create(hashSize, hash, equal)
-
 	err = filepath.Walk(sourceDir, a)
 	if err != nil {
 		fmt.Printf("filepath.Walk failed %v\n", err)
 		return
 	}
+	fmt.Printf("%d files processed\n", len(masterList))
+
+	md5Dict = hashdictionary.Create(hashSize, hash, equal)
+	masterToMD5Dict()
 	md5Dict.Map(display)
 }
